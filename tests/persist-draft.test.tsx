@@ -105,6 +105,35 @@ describe('ReportButton persistDraft', () => {
     expect(screen.getByRole('radio', { name: 'Feature request' })).toBeChecked();
   });
 
+  // Habitect report 64ba8b31: its dock opens the panel on its chat tab while a report is half written.
+  it('openReport on an extra tab with keepDraft opens that tab and leaves the draft behind it', async () => {
+    const store = memoryStore({ type: 'bug', text: 'Half written', context: 'what I picked', files: [], alts: [], key: null });
+    const seen: { text: string; context: string | null }[] = [];
+    const extraTabs = [{ id: 'agent', label: 'Agent task', render: ({ text, context }: { text: string; context: string | null }) => (seen.push({ text, context }), <p>the composer</p>) }];
+    render(<ReportButton areas={areas} submit={vi.fn()} persistDraft={store} extraTabs={extraTabs} />);
+    await waitFor(() => expect(store.load).toHaveBeenCalled());
+    act(() => openReport('agent', { keepDraft: true }));
+    expect(await screen.findByText('the composer')).toBeInTheDocument();
+    expect(seen.at(-1)).toEqual({ text: 'Half written', context: 'what I picked' });
+    await new Promise((r) => setTimeout(r, 500));
+    expect(store.kept()).toMatchObject({ type: 'bug', text: 'Half written' });
+
+    await userEvent.keyboard('{Escape}');
+    act(() => openReport('feature', { keepDraft: true }));
+    expect(await screen.findByDisplayValue('Half written')).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: 'Bug' })).toBeChecked();
+  });
+
+  it('openReport on an extra tab without keepDraft still starts the form fresh', async () => {
+    const store = memoryStore({ type: 'bug', text: 'Half written', context: null, files: [], alts: [], key: null });
+    const extraTabs = [{ id: 'agent', label: 'Agent task', render: () => <p>the composer</p> }];
+    render(<ReportButton areas={areas} submit={vi.fn()} persistDraft={store} extraTabs={extraTabs} />);
+    await waitFor(() => expect(store.load).toHaveBeenCalled());
+    act(() => openReport('agent'));
+    expect(await screen.findByText('the composer')).toBeInTheDocument();
+    await waitFor(() => expect(store.kept()).toBeNull());
+  });
+
   it('keepDraft keeps the in-memory draft without persistDraft too', async () => {
     render(<ReportButton areas={areas} submit={vi.fn()} />);
     await userEvent.click(openButton());

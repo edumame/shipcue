@@ -103,7 +103,8 @@ export interface OpenReportOptions {
   /**
    * Keep a Bug or Feature request draft that is not sent yet: the panel opens on the draft's own
    * tab with its text and screenshots, and on `tab` only when there is none (Habitect report
-   * e1204c25). Without it, openReport always starts a fresh, empty form.
+   * e1204c25). On one of your extraTabs it opens that tab, the draft left behind it as it was
+   * (Habitect report 64ba8b31). Without it, openReport always starts a fresh, empty form.
    */
   keepDraft?: boolean;
 }
