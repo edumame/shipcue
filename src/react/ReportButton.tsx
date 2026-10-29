@@ -696,10 +696,12 @@ function ReportPanel({
   };
   // A hotkey or openReport() always starts a fresh, empty form on its tab (outliner report 20:55),
   // even right after a send or with another tab half written. A click on the button keeps the draft,
-  // and so does openReport(tab, { keepDraft: true }), on the draft's own tab (Habitect report e1204c25).
+  // and so does openReport(tab, { keepDraft: true }), on the draft's own tab (Habitect report e1204c25),
+  // or on the extra tab asked for, with the draft left behind it as it was (Habitect report 64ba8b31).
   const openOn = (tab?: string, freshForm = false, keepDraft = false) => {
     const kept = keepDraft && hasDraft({ text, files });
-    const t = kept ? type : tab;
+    const besideDraft = kept && !!tab && !!extraTabs?.some((x) => x.id === tab);
+    const t = kept && !besideDraft ? type : tab;
     const fresh = freshForm && !kept;
     // A fresh form asked for before the kept draft was read back wins over it; keepDraft waits for it.
     if (fresh && !keepDraft && !draftReadyRef.current) {
@@ -711,7 +713,7 @@ function ReportPanel({
       setType(t as ReportType);
       setExtraId(null);
     }
-    const picked = pickContext();
+    const picked = besideDraft ? null : pickContext();
     if (fresh) {
       draftKeyRef.current = null;
       setText('');
