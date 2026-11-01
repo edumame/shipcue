@@ -7,6 +7,8 @@ const VERSION = JSON.parse(readFileSync('package.json', 'utf8')).version as stri
 // Type declarations come from `tsc -p tsconfig.build.json` (see the build script).
 export default defineConfig({
   entry: {
+    'text/index': 'src/text/index.ts',
+    'browser/index': 'src/browser/index.ts',
     'core/index': 'src/core/index.ts',
     'react/index': 'src/react/index.ts',
     'server/index': 'src/server/index.ts',
