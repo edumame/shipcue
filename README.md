@@ -359,6 +359,7 @@ SHIPCUE_TOKEN=dev node examples/demo-server.mjs
 ```bash
 pnpm test        # vitest; the Postgres store runs against real Postgres via PGlite
 pnpm typecheck
+pnpm test:package # built public entries, React-free graphs and shared state
 pnpm build
 ```
 
@@ -373,8 +374,11 @@ npm publish --access public
 
 Release tarballs for GitHub: `npm run pack:release` (builds, then `npm pack`).
 
+Use `shipcue/text` for `DEFAULT_TEXT` and `ShipcueText`, and `shipcue/browser` for imperative panel hotkeys, draft storage and screenshot capture. These entries share the existing implementations with `shipcue/react` without importing its React UI.
+
 ## Changelog
 
+- **0.39.1**: lightweight `shipcue/text` and `shipcue/browser` entries (Habitect report 95a374fe) keep text and imperative browser helpers out of the React UI bundle. Both support the import and default export conditions. Existing React exports remain compatible.
 - **0.39.0**: `openReport(extraTab, { keepDraft: true })` opens that extra tab and keeps a Bug or Feature request not sent yet behind it, text, context and screenshots as they were (Habitect report 64ba8b31), so an app can open its own tab (a chat) without losing what was being written; the draft comes back with the next `keepDraft` open of a report tab. Before, it opened on the draft's tab instead. Plain `openReport(extraTab)` still starts the form fresh. No text or schema change.
 - **0.38.0**: `reportKey` on `createAdminHandler`: the admin page shows a report button (Bug and Feature request) filing into that project, so shipcue Cloud's own reports go through shipcue. A project now takes reports from the admin's own page without listing it, and someone signed in to the admin files as their account rather than whoever the site says. No schema change.
 - **0.37.0**: Cloud Setup opens with **Set it all up with one prompt**: pick an agent and the repo's folder, and paste it into Claude Code (or Codex) on the machine. It adds the report button to the app in a PR, connects Claude to the project with the shipcue MCP server as that agent, and keeps a workflow working the queue there (`shipcue dispatch` on macOS, the listener as a systemd `--user` unit on Linux). This prompt and the listener's both now say how to remove it all again (`projectPrompt`, `dispatchUninstall`, `launchdUninstall`, `systemdUninstall` in the admin page's `listener.mjs`). No schema change.
