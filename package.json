@@ -54,7 +54,8 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "npm run build",
-    "pack:release": "npm run build && npm pack"
+    "pack:release": "npm run build && npm pack",
+    "test:package": "npm run build && node scripts/check-lightweight-entries.mjs"
   },
   "peerDependencies": {
     "react": ">=18",

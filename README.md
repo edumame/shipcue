@@ -359,6 +359,7 @@ SHIPCUE_TOKEN=dev node examples/demo-server.mjs
 ```bash
 pnpm test        # vitest; the Postgres store runs against real Postgres via PGlite
 pnpm typecheck
+pnpm test:package # built public entries, React-free graphs and shared state
 pnpm build
 ```
 
