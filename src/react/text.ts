@@ -51,6 +51,10 @@ export interface ShipcueText {
   selectionHeight: string;
   captureNow: string;
   captureAnnotate: string;
+  /** Record the selection as a video instead of a screenshot (Habitect report 95eb37f6). */
+  recordArea: string;
+  /** On the frame around the area while it records. */
+  recordingArea: string;
   captureDeclined: string;
   captureUnsupported: string;
   captureFailed: string;
@@ -206,6 +210,8 @@ export const DEFAULT_TEXT: ShipcueText = {
   selectionHeight: 'Height',
   captureNow: 'Capture',
   captureAnnotate: 'Capture & annotate',
+  recordArea: 'Record',
+  recordingArea: 'Recording this area',
   captureDeclined: 'Screen capture was not allowed. Paste a screenshot instead.',
   captureUnsupported: 'This browser cannot capture the page. Paste a screenshot instead.',
   captureFailed: 'Could not capture that area. Paste a screenshot instead.',

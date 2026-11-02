@@ -25,9 +25,9 @@ class FakeImage {
 }
 const stop = vi.fn();
 // Each share is its own track, so a test can end one ("Stop sharing") and see a fresh request.
-const tracks: { stop: () => void; readyState: string }[] = [];
+const tracks: (EventTarget & { stop: () => void; readyState: string })[] = [];
 const getDisplayMedia = vi.fn(async (_o?: unknown) => {
-  const track = { readyState: 'live', stop: () => ((track.readyState = 'ended'), stop()) };
+  const track: (typeof tracks)[number] = Object.assign(new EventTarget(), { readyState: 'live', stop: () => ((track.readyState = 'ended'), stop()) });
   tracks.push(track);
   return { getTracks: () => [track], getVideoTracks: () => [track] };
 });
@@ -552,7 +552,7 @@ describe('adjust before capturing (shipcue report 03de1f12)', () => {
           (_o?: unknown) =>
             new Promise((resolve) => {
               share = () => {
-                const track = { readyState: 'live', stop: () => ((track.readyState = 'ended'), stop()) };
+                const track: (typeof tracks)[number] = Object.assign(new EventTarget(), { readyState: 'live', stop: () => ((track.readyState = 'ended'), stop()) });
                 tracks.push(track);
                 resolve({ getTracks: () => [track], getVideoTracks: () => [track] });
               };
@@ -660,6 +660,137 @@ describe('adjust before capturing (shipcue report 03de1f12)', () => {
       await userEvent.keyboard('typed{Enter}');
       expect(getDisplayMedia).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('record an area (Habitect report 95eb37f6)', () => {
+  // jsdom has no MediaRecorder or canvas stream: a recorder that hands back one chunk on stop.
+  const outStop = vi.fn();
+  const recorders: FakeRecorder[] = [];
+  class FakeRecorder {
+    static isTypeSupported = (t: string) => t === 'video/webm';
+    state = 'inactive';
+    mimeType = 'video/webm';
+    ondataavailable: ((e: { data: Blob }) => void) | null = null;
+    onstop: (() => void) | null = null;
+    constructor(public stream: unknown) {
+      recorders.push(this);
+    }
+    start() {
+      this.state = 'recording';
+    }
+    stop() {
+      this.state = 'inactive';
+      this.ondataavailable?.({ data: new Blob([new Uint8Array(500)], { type: 'video/webm' }) });
+      this.onstop?.();
+    }
+  }
+  beforeEach(() => {
+    vi.stubGlobal('MediaRecorder', FakeRecorder);
+    HTMLCanvasElement.prototype.captureStream = vi.fn(() => ({ getTracks: () => [{ stop: outStop }], getVideoTracks: () => [] })) as never;
+    outStop.mockClear();
+    recorders.length = 0;
+  });
+  afterEach(() => {
+    delete (HTMLCanvasElement.prototype as { captureStream?: unknown }).captureStream;
+  });
+  const startSelecting = async (props: Partial<Parameters<typeof ReportButton>[0]> = {}) => {
+    const submit = await openPanel({ uploadVideo: vi.fn(async () => undefined), ...props });
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([100, 50], [300, 150]);
+    return submit;
+  };
+  const record = () => userEvent.click(within(toolbar()).getByRole('button', { name: 'Record' }));
+  const frame = () => document.querySelector('[data-shipcue-recording-frame]');
+
+  it('records just the selection from the tab share, framed in red outside it, until Stop', async () => {
+    await startSelecting();
+    await record();
+    await waitFor(() => expect(recorders).toHaveLength(1));
+    expect(getDisplayMedia).toHaveBeenCalledTimes(1);
+    // The panel steps aside; a red line just outside the area, and the timer to stop it.
+    expect(screen.queryByRole('dialog', { name: 'Report a bug' })).toBeNull();
+    const line = frame()!.firstElementChild as HTMLElement;
+    expect([line.style.left, line.style.top, line.style.width, line.style.height]).toEqual(['96px', '46px', '208px', '108px']);
+    expect(frame()!.textContent).toContain('Recording this area');
+    // Cropped at devicePixelRatio, as a screenshot is.
+    expect(drawImage.mock.calls[0]!.slice(1)).toEqual([200, 100, 400, 200, 0, 0, 400, 200]);
+    await userEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    expect(screen.getByRole('dialog', { name: 'Report a bug' })).toBeInTheDocument();
+    expect(frame()).toBeNull();
+    expect(document.querySelector('video')).not.toBeNull();
+    expect(screen.getByRole('button', { name: 'Remove video' })).toBeInTheDocument();
+    // The canvas stream ends; the tab share is kept for the next capture.
+    expect(outStop).toHaveBeenCalled();
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('sends the recording as the report video', async () => {
+    const uploadVideo = vi.fn(async (_id: string, _v: Blob) => undefined);
+    const submit = await startSelecting({ uploadVideo });
+    await record();
+    await waitFor(() => expect(recorders).toHaveLength(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    await userEvent.type(screen.getByRole('textbox', { name: 'Description' }), 'Watch it flicker');
+    await userEvent.click(screen.getByRole('button', { name: /Send/ }));
+    await waitFor(() => expect(uploadVideo).toHaveBeenCalledTimes(1));
+    expect(submit).toHaveBeenCalledTimes(1);
+    expect(uploadVideo.mock.calls[0]![1].type).toBe('video/webm');
+  });
+
+  it('ends when sharing is stopped from the browser, keeping what was recorded', async () => {
+    await startSelecting();
+    await record();
+    await waitFor(() => expect(recorders).toHaveLength(1));
+    act(() => {
+      tracks[0]!.dispatchEvent(new Event('ended'));
+    });
+    expect(screen.getByRole('button', { name: 'Remove video' })).toBeInTheDocument();
+    expect(frame()).toBeNull();
+  });
+
+  it('keeps recording while the page is hidden (another tab in front)', async () => {
+    await startSelecting();
+    await record();
+    await waitFor(() => expect(recorders).toHaveLength(1));
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'hidden' });
+    act(() => {
+      document.dispatchEvent(new Event('visibilitychange'));
+    });
+    Object.defineProperty(document, 'visibilityState', { configurable: true, get: () => 'visible' });
+    expect(recorders[0]!.state).toBe('recording');
+    expect(stop).not.toHaveBeenCalled();
+  });
+
+  it('says so in one line when the person declines to share', async () => {
+    getDisplayMedia.mockRejectedValueOnce(new DOMException('no', 'NotAllowedError'));
+    await startSelecting();
+    await record();
+    expect(await screen.findByText('Screen capture was not allowed. Paste a screenshot instead.')).toBeInTheDocument();
+    expect(frame()).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop recording' })).toBeNull();
+  });
+
+  it('is offered only while the report can take a video and the browser can record', async () => {
+    // No video for this app (submit without uploadVideo).
+    await openPanel();
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([100, 50], [300, 150]);
+    expect(within(toolbar()).queryByRole('button', { name: 'Record' })).toBeNull();
+    cleanup();
+    delete (HTMLCanvasElement.prototype as { captureStream?: unknown }).captureStream;
+    await startSelecting();
+    expect(within(toolbar()).queryByRole('button', { name: 'Record' })).toBeNull();
+  });
+
+  it('is gone once the report has its video', async () => {
+    await startSelecting();
+    await record();
+    await waitFor(() => expect(recorders).toHaveLength(1));
+    await userEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([10, 10], [110, 60]);
+    expect(within(toolbar()).queryByRole('button', { name: 'Record' })).toBeNull();
   });
 });
 

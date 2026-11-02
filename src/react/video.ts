@@ -32,29 +32,40 @@ export interface RecordingResult {
   note: string | null;
 }
 
+export interface RecordOptions {
+  maxSeconds: number;
+  maxBytes: number;
+  onTick: (seconds: number) => void;
+  onDone: (result: RecordingResult) => void;
+}
+
 /**
  * Ask which screen, window or tab to share and record it until stop(), the
  * browser's own Stop sharing, the time cap or the size cap; then call onDone
  * once. Rejects if sharing was refused.
  */
-export async function recordScreen(opts: {
-  maxSeconds: number;
-  maxBytes: number;
-  onTick: (seconds: number) => void;
-  onDone: (result: RecordingResult) => void;
-}): Promise<ScreenRecording> {
+export async function recordScreen(opts: RecordOptions): Promise<ScreenRecording> {
   const options: DisplayMediaStreamOptions & { selfBrowserSurface?: 'include' | 'exclude' } = {
     video: { frameRate: 15 },
     audio: false,
     selfBrowserSurface: 'include',
   };
   const stream = await navigator.mediaDevices.getDisplayMedia(options);
+  const release = () => stream.getTracks().forEach((track) => track.stop());
+  return recordStream(stream, opts, { release, source: stream });
+}
+
+/**
+ * Record `stream` with the same caps as recordScreen. `release` runs once when it stops (or fails
+ * to start); it stops too when `source`'s video track ends (the browser's Stop sharing).
+ */
+export function recordStream(stream: MediaStream, opts: RecordOptions, { release, source }: { release: () => void; source: MediaStream }): ScreenRecording {
   const mimeType = pickMimeType();
   let media: MediaRecorder;
   try {
     media = new MediaRecorder(stream, { ...(mimeType ? { mimeType } : {}), videoBitsPerSecond: BITS_PER_SECOND });
   } catch (e) {
-    for (const track of stream.getTracks()) track.stop();
+    release();
     throw e;
   }
   const chunks: Blob[] = [];
@@ -69,6 +80,13 @@ export async function recordScreen(opts: {
     note = `Recording stopped at ${opts.maxSeconds} seconds.`;
     stop();
   }, opts.maxSeconds * 1000);
+  const ended = source.getVideoTracks()[0];
+  const finish = () => {
+    clearInterval(tick);
+    clearTimeout(cap);
+    ended?.removeEventListener('ended', stop);
+    release();
+  };
   media.ondataavailable = (e) => {
     if (e.data.size === 0) return;
     if (bytes + e.data.size > opts.maxBytes) {
@@ -80,19 +98,15 @@ export async function recordScreen(opts: {
     chunks.push(e.data);
   };
   media.onstop = () => {
-    clearInterval(tick);
-    clearTimeout(cap);
-    for (const track of stream.getTracks()) track.stop();
+    finish();
     const type = videoType(media.mimeType || mimeType) ?? 'video/webm';
     opts.onDone({ blob: chunks.length > 0 ? new Blob(chunks, { type }) : null, note });
   };
-  stream.getVideoTracks()[0]?.addEventListener('ended', stop);
+  ended?.addEventListener('ended', stop);
   try {
     media.start(1000);
   } catch (e) {
-    clearInterval(tick);
-    clearTimeout(cap);
-    for (const track of stream.getTracks()) track.stop();
+    finish();
     throw e;
   }
   return { stop };
