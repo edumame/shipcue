@@ -783,6 +783,12 @@ describe('record an area (Habitect report 95eb37f6)', () => {
     expect(within(toolbar()).queryByRole('button', { name: 'Record' })).toBeNull();
   });
 
+  it('recordArea={false} hides it (an app whose tab share is a still picture)', async () => {
+    await startSelecting({ recordArea: false });
+    expect(within(toolbar()).queryByRole('button', { name: 'Record' })).toBeNull();
+    expect(within(toolbar()).getByRole('button', { name: 'Capture' })).toBeInTheDocument();
+  });
+
   it('is gone once the report has its video', async () => {
     await startSelecting();
     await record();

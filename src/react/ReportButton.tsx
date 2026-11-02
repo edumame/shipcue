@@ -199,6 +199,12 @@ export interface ReportButtonProps {
    */
   captureKeepAlive?: number;
   /**
+   * Record in a selection's toolbar: the area as a video (Habitect report 95eb37f6). On by default
+   * wherever the report takes a video and the browser can record; false hides it, e.g. where your
+   * app answers the tab share with a still picture (a recording of it would not move).
+   */
+  recordArea?: boolean;
+  /**
    * Keep the Bug or Feature request form not sent yet (its tab, text, context, screenshots and
    * files) in the browser, so leaving the app or reloading the page brings it back (Habitect report
    * e1204c25): a phone often drops a backgrounded tab. true keeps it in IndexedDB; pass your own
@@ -360,6 +366,7 @@ function ReportPanel({
   dimOnOpen = false,
   captureOnOpen: captureOnOpenProp,
   captureKeepAlive = CAPTURE_KEEP_ALIVE_MS,
+  recordArea = true,
   persistDraft = false,
 }: ReportButtonProps) {
   const captureOnOpen = captureOnOpenProp ?? variant === 'floating';
@@ -1114,7 +1121,7 @@ function ReportPanel({
     }
   };
   // Record is offered while the report can still take a video.
-  const areaRecord = videoOn && !video && canRecordArea();
+  const areaRecord = recordArea && videoOn && !video && canRecordArea();
 
   const finishAnnotating = (blob: Blob | null, alt = '') => {
     const a = annotating;
