@@ -16,5 +16,5 @@ export { BUTTON_PX, TEXT_ZOOM, type Size as ShipcueSize } from './appearance';
 export { PinIcon } from './PinIcon';
 export { Annotator, type AnnotatorProps } from './Annotator';
 export { AreaSelect, type AreaSelectProps } from './AreaSelect';
-export { captureArea, canCaptureTab, canRecordArea, cropRect, tabCapture, CAPTURE_KEEP_ALIVE_MS, type TabCapture, type Rect as ShipcueRect } from './capture';
+export { AREA_FPS, captureArea, canCaptureTab, canRecordArea, cropRect, tabCapture, CAPTURE_KEEP_ALIVE_MS, type TabCapture, type Rect as ShipcueRect } from './capture';
 export type { AgentPromptAuth } from './agentPrompt';

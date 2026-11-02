@@ -725,6 +725,21 @@ describe('record an area (Habitect report 95eb37f6)', () => {
     expect(stop).not.toHaveBeenCalled();
   });
 
+  it('asks the share for a frame rate, so an app answering screenshots with a still picture can tell a recording apart', async () => {
+    await startSelecting();
+    await record();
+    await waitFor(() => expect(recorders).toHaveLength(1));
+    expect(getDisplayMedia.mock.calls[0]![0]).toMatchObject({ preferCurrentTab: true, audio: false, video: { frameRate: 15 } });
+    await userEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    // A screenshot's ask has none (here a fresh share: the recording's was stopped from the browser).
+    tracks[0]!.stop();
+    await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
+    drag([10, 10], [110, 60]);
+    await userEvent.keyboard('{Enter}');
+    await screen.findByAltText('Screenshot 1');
+    expect((getDisplayMedia.mock.calls[1]![0] as { video: object }).video).not.toHaveProperty('frameRate');
+  });
+
   it('sends the recording as the report video', async () => {
     const uploadVideo = vi.fn(async (_id: string, _v: Blob) => undefined);
     const submit = await startSelecting({ uploadVideo });
