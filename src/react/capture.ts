@@ -105,11 +105,24 @@ export function resizeRect(r: Rect, handle: Handle, dx: number, dy: number, view
   return { x: left, y: top, width: right - left, height: bottom - top };
 }
 
+/** Frames a second in an area recording: smooth enough for clicks and scrolling, small enough to send. */
+export const AREA_FPS = 15;
+
 const SHARE_OPTIONS = {
   video: { displaySurface: 'browser' },
   audio: false,
   preferCurrentTab: true,
   selfBrowserSurface: 'include',
+} as DisplayMediaStreamOptions;
+
+/**
+ * A recording's share asks for a frame rate (Habitect report 95eb37f6): an app that answers a
+ * screenshot's ask with a still picture of the page (Habitect's Mac app) tells the two apart by
+ * it, and hands a recording its live share.
+ */
+const RECORD_SHARE_OPTIONS = {
+  ...SHARE_OPTIONS,
+  video: { displaySurface: 'browser', frameRate: AREA_FPS },
 } as DisplayMediaStreamOptions;
 
 type FrameVideo = HTMLVideoElement & { requestVideoFrameCallback?: (cb: () => void) => number };
@@ -134,8 +147,6 @@ export interface TabCapture {
   stop(): void;
 }
 
-/** Frames a second in an area recording: smooth enough for clicks and scrolling, small enough to send. */
-export const AREA_FPS = 15;
 
 /** Whether this browser can record a selected area: a tab share, a canvas stream and MediaRecorder. */
 export function canRecordArea(): boolean {
@@ -173,12 +184,12 @@ export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveM
     else stop();
   };
   // A live share with a frame drawn after the tint and the panel are gone.
-  const ensure = async (): Promise<FrameVideo> => {
+  const ensure = async (options: DisplayMediaStreamOptions = SHARE_OPTIONS): Promise<FrameVideo> => {
     if (!canCaptureTab()) throw Object.assign(new Error('Unsupported'), { name: 'Unsupported' });
     clearTimeout(idle);
     if (!live()) {
       stop();
-      stream = await navigator.mediaDevices.getDisplayMedia(SHARE_OPTIONS);
+      stream = await navigator.mediaDevices.getDisplayMedia(options);
       video = document.createElement('video');
       video.muted = true;
       video.playsInline = true;
@@ -225,7 +236,7 @@ export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveM
   const record = async (sel: Rect, opts: RecordOptions): Promise<ScreenRecording> => {
     let draw: ReturnType<typeof setInterval> | undefined;
     try {
-      const v = await ensure();
+      const v = await ensure(RECORD_SHARE_OPTIONS);
       const share = stream!;
       const first = cropNow(v, sel);
       const canvas = document.createElement('canvas');
