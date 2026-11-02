@@ -16,9 +16,9 @@ import { shrinkImage } from './shrink';
 import { isOutlineText, OutlinePreview } from './outline';
 import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
-import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, captureError, overlaps, tabCapture, type Rect, type TabCapture } from './capture';
+import { afterPaint, CAPTURE_KEEP_ALIVE_MS, canCaptureTab, canRecordArea, captureError, overlaps, tabCapture, type Rect, type TabCapture } from './capture';
 import { AreaSelect } from './AreaSelect';
-import { CaptureVeil } from './CaptureVeil';
+import { CaptureVeil, RecordingFrame } from './CaptureVeil';
 import { hasDraft, indexedDbDraftStore, type DraftStore, type SavedDraft } from './draft';
 import { Annotator } from './Annotator';
 import { agentPrompt, type AgentPromptAuth } from './agentPrompt';
@@ -199,6 +199,12 @@ export interface ReportButtonProps {
    */
   captureKeepAlive?: number;
   /**
+   * Record in a selection's toolbar: the area as a video (Habitect report 95eb37f6). On by default
+   * wherever the report takes a video and the browser can record; false hides it, e.g. where your
+   * app answers the tab share with a still picture (a recording of it would not move).
+   */
+  recordArea?: boolean;
+  /**
    * Keep the Bug or Feature request form not sent yet (its tab, text, context, screenshots and
    * files) in the browser, so leaving the app or reloading the page brings it back (Habitect report
    * e1204c25): a phone often drops a backgrounded tab. true keeps it in IndexedDB; pass your own
@@ -360,6 +366,7 @@ function ReportPanel({
   dimOnOpen = false,
   captureOnOpen: captureOnOpenProp,
   captureKeepAlive = CAPTURE_KEEP_ALIVE_MS,
+  recordArea = true,
   persistDraft = false,
 }: ReportButtonProps) {
   const captureOnOpen = captureOnOpenProp ?? variant === 'floating';
@@ -414,6 +421,8 @@ function ReportPanel({
   const [capturing, setCapturing] = useState(false);
   // The selection being captured, until its picture is taken (CaptureVeil).
   const [veilHole, setVeilHole] = useState<Rect | null>(null);
+  // The area being recorded as a video (Habitect report 95eb37f6): framed on the page meanwhile.
+  const [recordingArea, setRecordingArea] = useState<Rect | null>(null);
   /** The panel is hidden for this capture: it was hidden for Select area, or it is inside the selection. */
   const [panelInShot, setPanelInShot] = useState(false);
   const [annotating, setAnnotating] = useState<{ src: string; index: number | null; alt: string; name: string; own: boolean } | null>(null);
@@ -1040,7 +1049,8 @@ function ReportPanel({
     if (!open) tabRef.current?.capture.stop();
   }, [open]);
   useEffect(() => {
-    const onHide = () => document.visibilityState === 'hidden' && tabRef.current?.capture.stop();
+    // A recording keeps its share: the tab is still recorded while another one is in front.
+    const onHide = () => document.visibilityState === 'hidden' && !recorderRef.current && tabRef.current?.capture.stop();
     document.addEventListener('visibilitychange', onHide);
     return () => {
       document.removeEventListener('visibilitychange', onHide);
@@ -1052,7 +1062,8 @@ function ReportPanel({
   // is in the picture. The panel goes too only when it would be: one beside the selection stays
   // put instead of blinking out and back (Habitect report 71cc2002). Capture attaches it;
   // Capture & annotate opens the annotator. The veil shows meanwhile (Habitect report cbb24947).
-  const captureSelection = async (rect: Rect, { annotate }: { annotate: boolean }) => {
+  const captureSelection = async (rect: Rect, { annotate, record }: { annotate: boolean; record?: boolean }) => {
+    if (record) return recordSelection(rect);
     const shown = [wrapRef.current, panelRef.current].flatMap((el) => (el ? [el.getBoundingClientRect()] : []));
     setPanelInShot(selecting || shown.some((box) => overlaps(rect, box)));
     setSelecting(false);
@@ -1074,6 +1085,43 @@ function ReportPanel({
       setOpen(true);
     }
   };
+
+  // Record: the selected area as a video in the video slot, on the same tab share as the
+  // screenshots (Habitect report 95eb37f6). The panel steps aside; a frame just outside the area
+  // shows what is recorded, and the red timer stops it, as Record screen's does.
+  const recordSelection = async (rect: Rect) => {
+    setSelecting(false);
+    setTintLifted(true);
+    setError(null);
+    setRecordingArea(rect);
+    setRecording(0);
+    const back = () => {
+      recorderRef.current = null;
+      setRecordingArea(null);
+      setRecording(null);
+      setSent(null);
+      setOpen(true);
+    };
+    try {
+      await afterPaint();
+      recorderRef.current = await tab().record(rect, {
+        maxSeconds: lim.maxVideoSeconds,
+        maxBytes: maxVideoBytes,
+        onTick: setRecording,
+        onDone: ({ blob, note }) => {
+          back();
+          if (blob) attachVideo(blob);
+          if (note) setError(note);
+        },
+      });
+    } catch (e) {
+      back();
+      const problem = captureError(e);
+      if (problem) setError(problem === 'declined' ? t.captureDeclined : problem === 'unsupported' ? t.captureUnsupported : t.captureFailed);
+    }
+  };
+  // Record is offered while the report can still take a video.
+  const areaRecord = recordArea && videoOn && !video && canRecordArea();
 
   const finishAnnotating = (blob: Blob | null, alt = '') => {
     const a = annotating;
@@ -1215,11 +1263,12 @@ function ReportPanel({
   return (
     <div ref={wrapRef} data-shipcue={variant} style={{ ...(variant === 'floating' ? { ...s.floatingWrap, ...drag.wrapStyle } : s.inlineWrap), ...(selecting || (capturing && panelInShot) ? { visibility: 'hidden' } : null) }}>
       {ambient && typeof document !== 'undefined' && (
-        <AreaSelect ambient hint={t.captureOnOpenHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
+        <AreaSelect ambient record={areaRecord} hint={t.captureOnOpenHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setTintLifted(true)} onDismiss={() => setTintLifted(true)} />
       )}
       {dimOnOpen && open && !ambient && !selecting && !capturing && typeof document !== 'undefined' && createPortal(<div data-shipcue-dim="" aria-hidden="true" style={s.dim} />, document.body)}
       {capturing && <CaptureVeil hole={veilHole} label={t.capturing} />}
-      {selecting && <AreaSelect hint={t.selectAreaHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setSelecting(false)} />}
+      {recordingArea && typeof document !== 'undefined' && createPortal(<RecordingFrame rect={recordingArea} label={t.recordingArea} />, document.body)}
+      {selecting && <AreaSelect record={areaRecord} hint={t.selectAreaHint} text={t} onSelect={(r, o) => void captureSelection(r, o)} onCancel={() => setSelecting(false)} />}
       {annotating && (
         <Annotator
           src={annotating.src}

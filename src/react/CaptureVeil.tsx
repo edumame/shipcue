@@ -35,6 +35,30 @@ export function CaptureVeil({ hole, label }: { hole: Rect | null; label: string 
   );
 }
 
+/** CSS px of the red line around an area being recorded; it sits outside the area, so it is never in the video. */
+const FRAME_LINE = 2;
+
+/**
+ * The area being recorded (Habitect report 95eb37f6): a red line just outside it and a small
+ * label beside it. The page stays usable (that is what is being recorded), so it takes no clicks.
+ */
+export function RecordingFrame({ rect, label }: { rect: Rect; label: string }) {
+  const out = VEIL_GAP + FRAME_LINE;
+  const box = { x: rect.x - out, y: rect.y - out, width: rect.width + 2 * out, height: rect.height + 2 * out };
+  const pill = pillBeside(box);
+  return (
+    <div data-shipcue-recording-frame="" aria-hidden="true" style={s.frameLayer}>
+      <div style={{ ...s.frame, left: box.x, top: box.y, width: box.width, height: box.height }} />
+      {pill && (
+        <p style={{ ...s.pill, ...pill }}>
+          <span style={s.dot} />
+          {label}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /** Under the hole, else over it; null when the hole leaves no room for it. */
 function pillBeside(hole: Rect): CSSProperties | null {
   const centre = { left: hole.x + hole.width / 2, transform: 'translateX(-50%)' };
@@ -50,6 +74,9 @@ const s: Record<string, CSSProperties> = {
   // Under the report panel (as the dim is), which stays usable.
   veil: { position: 'fixed', inset: 0, zIndex: 2147482999, cursor: 'progress' },
   hole: { position: 'absolute', boxShadow: `0 0 0 200vmax ${TINT}`, pointerEvents: 'none' },
+  frameLayer: { position: 'fixed', inset: 0, zIndex: 2147482999, pointerEvents: 'none' },
+  frame: { position: 'absolute', boxSizing: 'border-box', border: `${FRAME_LINE}px solid #e11d48`, borderRadius: 2 },
+  dot: { width: 8, height: 8, borderRadius: 999, background: '#e11d48' },
   centred: { left: '50%', top: '50%', transform: 'translate(-50%, -50%)' },
   pill: { position: 'absolute', display: 'flex', alignItems: 'center', gap: 8, margin: 0, padding: '5px 12px', borderRadius: 999, background: 'rgba(9,9,11,0.75)', color: '#fff', fontSize: 12, fontFamily: font, whiteSpace: 'nowrap', pointerEvents: 'none' },
   spinner: { width: 12, height: 12, boxSizing: 'border-box', borderRadius: '50%', border: '2px solid rgba(255,255,255,0.3)', borderTopColor: '#fff' },

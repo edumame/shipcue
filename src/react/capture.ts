@@ -1,5 +1,7 @@
 'use client';
 
+import { recordStream, type RecordOptions, type ScreenRecording } from './video';
+
 // Select an area of the page and capture it as a screenshot (shipcue report 58b727d9).
 // The pixels come from the browser's own tab capture (getDisplayMedia, as video.ts uses for
 // recordings): a frame cropped to the selection. The share is kept while the panel is open, so
@@ -122,9 +124,26 @@ export interface TabCapture {
    * is held. `onTaken` runs once the frame is drawn: from then on the page can change freely.
    */
   grab(sel: Rect, onTaken?: () => void): Promise<Blob>;
+  /**
+   * Record the tab cropped to `sel` (CSS px in the viewport) as a video (Habitect report 95eb37f6),
+   * on the same share as grab, so a session asks the browser once for screenshots and recordings.
+   * The share is held until the recording stops, then kept for `keepAliveMs` as after a grab.
+   */
+  record(sel: Rect, opts: RecordOptions): Promise<ScreenRecording>;
   /** Stop sharing now (the panel closed, the page hid). */
   stop(): void;
 }
+
+/** Frames a second in an area recording: smooth enough for clicks and scrolling, small enough to send. */
+export const AREA_FPS = 15;
+
+/** Whether this browser can record a selected area: a tab share, a canvas stream and MediaRecorder. */
+export function canRecordArea(): boolean {
+  return canCaptureTab() && typeof MediaRecorder !== 'undefined' && typeof HTMLCanvasElement !== 'undefined' && typeof HTMLCanvasElement.prototype.captureStream === 'function';
+}
+
+/** Video encoders want even sides: round each up, at least 2. */
+export const evenSize = (n: number) => Math.max(2, n + (n % 2));
 
 /**
  * Tab capture that keeps a granted share for later captures (shipcue report 03de1f12): Chrome's
@@ -136,41 +155,56 @@ export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveM
   let stream: MediaStream | null = null;
   let video: FrameVideo | null = null;
   let idle: ReturnType<typeof setTimeout> | undefined;
+  // A recording on the share, ended with it: a track stopped here fires no "ended".
+  let recording: ScreenRecording | null = null;
   const stop = () => {
     clearTimeout(idle);
+    recording?.stop();
+    recording = null;
     stream?.getTracks().forEach((t) => t.stop());
     if (video) video.srcObject = null;
     stream = null;
     video = null;
   };
   const live = () => !!stream && stream.getVideoTracks().some((t) => t.readyState !== 'ended');
-  const grab = async (sel: Rect, onTaken?: () => void): Promise<Blob> => {
+  const rest = () => {
+    if (!stream) return;
+    if (keepAliveMs > 0) idle = setTimeout(stop, keepAliveMs);
+    else stop();
+  };
+  // A live share with a frame drawn after the tint and the panel are gone.
+  const ensure = async (): Promise<FrameVideo> => {
     if (!canCaptureTab()) throw Object.assign(new Error('Unsupported'), { name: 'Unsupported' });
     clearTimeout(idle);
+    if (!live()) {
+      stop();
+      stream = await navigator.mediaDevices.getDisplayMedia(SHARE_OPTIONS);
+      video = document.createElement('video');
+      video.muted = true;
+      video.playsInline = true;
+      video.srcObject = stream;
+      await video.play();
+      // The first frame can be blank in some browsers: wait for one with a size, then one more.
+      for (let i = 0; i < 30 && !video.videoWidth; i++) await nextFrame();
+      await nextFrame();
+    } else {
+      // A held share: the page has just repainted without the tint and the panel, so take a
+      // frame from after that.
+      await video!.play();
+      await nextVideoFrame(video!);
+      await nextVideoFrame(video!);
+    }
+    return video!;
+  };
+  const cropNow = (v: FrameVideo, sel: Rect) => {
+    const frame = { width: v.videoWidth, height: v.videoHeight };
+    if (!frame.width || !frame.height) throw new Error('No frame');
+    return cropRect(sel, frame, { width: window.innerWidth, height: window.innerHeight }, window.devicePixelRatio || 1);
+  };
+  const grab = async (sel: Rect, onTaken?: () => void): Promise<Blob> => {
     try {
-      if (!live()) {
-        stop();
-        stream = await navigator.mediaDevices.getDisplayMedia(SHARE_OPTIONS);
-        video = document.createElement('video');
-        video.muted = true;
-        video.playsInline = true;
-        video.srcObject = stream;
-        await video.play();
-        // The first frame can be blank in some browsers: wait for one with a size, then one more.
-        for (let i = 0; i < 30 && !video.videoWidth; i++) await nextFrame();
-        await nextFrame();
-      } else {
-        // A held share: the page has just repainted without the tint and the panel, so take a
-        // frame from after that.
-        await video!.play();
-        await nextVideoFrame(video!);
-        await nextVideoFrame(video!);
-      }
-      const v = video!;
-      const viewport = { width: window.innerWidth, height: window.innerHeight };
-      const frame = { width: v.videoWidth, height: v.videoHeight };
-      if (!frame.width || !frame.height) throw new Error('No frame');
-      const crop = cropRect(sel, frame, viewport, window.devicePixelRatio || 1);
+      const v = await ensure();
+      const crop = cropNow(v, sel);
       const canvas = document.createElement('canvas');
       canvas.width = crop.width;
       canvas.height = crop.height;
@@ -185,13 +219,44 @@ export function tabCapture({ keepAliveMs = CAPTURE_KEEP_ALIVE_MS }: { keepAliveM
       stop();
       throw e;
     } finally {
-      if (stream) {
-        if (keepAliveMs > 0) idle = setTimeout(stop, keepAliveMs);
-        else stop();
-      }
+      rest();
     }
   };
-  return { grab, stop };
+  const record = async (sel: Rect, opts: RecordOptions): Promise<ScreenRecording> => {
+    let draw: ReturnType<typeof setInterval> | undefined;
+    try {
+      const v = await ensure();
+      const share = stream!;
+      const first = cropNow(v, sel);
+      const canvas = document.createElement('canvas');
+      canvas.width = evenSize(first.width);
+      canvas.height = evenSize(first.height);
+      const ctx = canvas.getContext('2d');
+      if (!ctx) throw new Error('No canvas');
+      // Each frame is cropped again: a "sharing this tab" bar can change the frame meanwhile.
+      const paint = () => {
+        if (!v.videoWidth || !v.videoHeight) return;
+        const crop = cropNow(v, sel);
+        ctx.drawImage(v, crop.x, crop.y, crop.width, crop.height, 0, 0, canvas.width, canvas.height);
+      };
+      paint();
+      draw = setInterval(paint, 1000 / AREA_FPS);
+      const out = canvas.captureStream(AREA_FPS);
+      const release = () => {
+        recording = null;
+        clearInterval(draw);
+        out.getTracks().forEach((t) => t.stop());
+        rest();
+      };
+      recording = recordStream(out, opts, { release, source: share });
+      return recording;
+    } catch (e) {
+      clearInterval(draw);
+      stop();
+      throw e;
+    }
+  };
+  return { grab, record, stop };
 }
 
 /**

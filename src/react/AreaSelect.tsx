@@ -12,8 +12,9 @@ import { DEFAULT_TEXT, type ShipcueText } from './text';
 //
 // Letting go no longer captures (shipcue report 03de1f12): the selection stays, CleanShot-style,
 // to move (drag inside), resize (eight handles, or the size fields) or redraw (drag outside it),
-// with a small toolbar: Cancel (Esc), Capture & annotate, Capture (Enter, the default). Nothing is asked of
-// the browser until one of the captures.
+// with a small toolbar: Cancel (Esc), Record (`record`: the area as a video, Habitect report
+// 95eb37f6), Capture & annotate, Capture (Enter, the default). Nothing is asked of the browser
+// until one of them.
 //
 // `ambient` (shipcue report 503aa011): the same tint and drag, laid under the open report panel
 // so a drag anywhere on the page selects with no hotkey or button. It takes no keys and no focus
@@ -21,8 +22,10 @@ import { DEFAULT_TEXT, type ShipcueText } from './text';
 // lifts it (onDismiss).
 
 export interface AreaSelectProps {
-  /** A capture was asked for: `annotate` when the person chose Capture & annotate. */
-  onSelect: (rect: Rect, opts: { annotate: boolean }) => void;
+  /** A capture was asked for: `annotate` when the person chose Capture & annotate, `record` for Record. */
+  onSelect: (rect: Rect, opts: { annotate: boolean; record?: boolean }) => void;
+  /** Offer Record in the toolbar: the selection as a video (Habitect report 95eb37f6). Off by default. */
+  record?: boolean;
   onCancel: () => void;
   /** The line at the top, e.g. "Drag to select an area · Enter captures · Esc cancels". */
   hint: string;
@@ -47,7 +50,7 @@ type Drag = { kind: 'draw' | 'move' | Handle; from: Point; base: Rect | null; li
 const CURSOR: Record<Handle, string> = { nw: 'nwse-resize', se: 'nwse-resize', ne: 'nesw-resize', sw: 'nesw-resize', n: 'ns-resize', s: 'ns-resize', e: 'ew-resize', w: 'ew-resize' };
 const AT: Record<Handle, [string, string]> = { nw: ['0%', '0%'], n: ['50%', '0%'], ne: ['100%', '0%'], e: ['100%', '50%'], se: ['100%', '100%'], s: ['50%', '100%'], sw: ['0%', '100%'], w: ['0%', '50%'] };
 
-export function AreaSelect({ onSelect, onCancel, hint, text: t = DEFAULT_TEXT, minSize = 8, ambient = false, onDismiss, clickSlop = 5 }: AreaSelectProps) {
+export function AreaSelect({ onSelect, onCancel, hint, text: t = DEFAULT_TEXT, minSize = 8, ambient = false, onDismiss, clickSlop = 5, record = false }: AreaSelectProps) {
   const [rect, setRect] = useState<Rect | null>(null);
   // 'adjust': drawn and let go; the selection waits for a capture.
   const [phase, setPhase] = useState<'idle' | 'draw' | 'adjust'>('idle');
@@ -73,9 +76,9 @@ export function AreaSelect({ onSelect, onCancel, hint, text: t = DEFAULT_TEXT, m
   });
 
   const adjusting = phase === 'adjust' && !!rect;
-  const capture = (annotate: boolean) => {
+  const capture = (annotate: boolean, asVideo = false) => {
     const r = rectRef.current;
-    if (r && phaseRef.current === 'adjust') done.current.onSelect(r, { annotate });
+    if (r && phaseRef.current === 'adjust') done.current.onSelect(r, asVideo ? { annotate, record: true } : { annotate });
   };
   const cancel = () => {
     // Ambient: drop the selection and keep the tint; the panel's Esc lifts the tint after that.
@@ -281,6 +284,12 @@ export function AreaSelect({ onSelect, onCancel, hint, text: t = DEFAULT_TEXT, m
           <button type="button" onClick={cancel} style={s.btn}>
             {t.cancel}
           </button>
+          {record && (
+            <button type="button" onClick={() => capture(false, true)} style={{ ...s.btn, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+              <span aria-hidden="true" style={s.dot} />
+              {t.recordArea}
+            </button>
+          )}
           <button type="button" onClick={() => capture(true)} style={s.btn}>
             {t.captureAnnotate}
           </button>
@@ -316,4 +325,5 @@ const s: Record<string, CSSProperties> = {
   btn: { padding: '3px 9px', border: 0, borderRadius: 999, background: 'transparent', color: 'rgba(255,255,255,0.85)', font: 'inherit', cursor: 'pointer' },
   primary: { background: '#fff', color: '#18181b', fontWeight: 500 },
   key: { marginLeft: 5, opacity: 0.55 },
+  dot: { width: 8, height: 8, borderRadius: 999, background: '#e11d48' },
 };
