@@ -55,6 +55,10 @@ export interface ShipcueText {
   recordArea: string;
   /** On the frame around the area while it records. */
   recordingArea: string;
+  /** Beside a clip: turn it into a GIF among the screenshots (Habitect report 92e96c31). */
+  makeGif: string;
+  makingGif: string;
+  gifFailed: string;
   captureDeclined: string;
   captureUnsupported: string;
   captureFailed: string;
@@ -212,6 +216,9 @@ export const DEFAULT_TEXT: ShipcueText = {
   captureAnnotate: 'Capture & annotate',
   recordArea: 'Record',
   recordingArea: 'Recording this area',
+  makeGif: 'Make GIF',
+  makingGif: 'Making GIF…',
+  gifFailed: 'Could not make a GIF of that video. It is still attached as a video.',
   captureDeclined: 'Screen capture was not allowed. Paste a screenshot instead.',
   captureUnsupported: 'This browser cannot capture the page. Paste a screenshot instead.',
   captureFailed: 'Could not capture that area. Paste a screenshot instead.',
