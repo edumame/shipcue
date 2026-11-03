@@ -13,6 +13,7 @@ import { BUTTON_PX, RESIZE, SIZES, TEXT_ZOOM, loadAppearance, loadPanelSize, sav
 import { BLOCKED_FILE_TYPES, formatBytes, newIdempotencyKey, PRIORITIES, PRIORITY_HINT, PRIORITY_LABEL, resolveConfig, videoType, type Area, type Capabilities, type Limits, type MineItem, type Status, type Priority, type ReportType } from '../core';
 import { captureErrors as startCapturingErrors, recentErrors } from './errors';
 import { shrinkImage } from './shrink';
+import { videoToGif } from './gif';
 import { isOutlineText, OutlinePreview } from './outline';
 import { fill, resolveText, type ShipcueText } from './text';
 import { canRecordScreen, recordScreen, shareError, type ScreenRecording } from './video';
@@ -433,6 +434,7 @@ function ReportPanel({
   const [error, setError] = useState<string | null>(null);
   const [page, setPage] = useState<string | null>(null);
   const [video, setVideo] = useState<{ blob: Blob; preview: string } | null>(null);
+  const [makingGif, setMakingGif] = useState(false);
   const [recording, setRecording] = useState<number | null>(null);
   const recorderRef = useRef<ScreenRecording | null>(null);
   const videoInputRef = useRef<HTMLInputElement>(null);
@@ -1120,6 +1122,20 @@ function ReportPanel({
       if (problem) setError(problem === 'declined' ? t.captureDeclined : problem === 'unsupported' ? t.captureUnsupported : t.captureFailed);
     }
   };
+  // The clip as a GIF among the screenshots, in place of the video (Habitect report 92e96c31).
+  const clipToGif = async (clip: Blob) => {
+    setError(null);
+    setMakingGif(true);
+    try {
+      const gif = await videoToGif(clip, { maxBytes: lim.maxScreenshotBytes });
+      await addFiles([new File([gif], 'recording.gif', { type: 'image/gif' })]);
+      setVideo(null);
+    } catch {
+      setError(t.gifFailed);
+    } finally {
+      setMakingGif(false);
+    }
+  };
   // Record is offered while the report can still take a video.
   const areaRecord = recordArea && videoOn && !video && canRecordArea();
 
@@ -1665,6 +1681,11 @@ function ReportPanel({
                     </>
                   )}
                   {video && <span style={s.hint}>{formatBytes(video.blob.size)}</span>}
+                  {video && files.length < lim.maxScreenshots && (
+                    <button type="button" disabled={makingGif} onClick={() => void clipToGif(video.blob)} style={s.linkBtn}>
+                      {makingGif ? t.makingGif : t.makeGif}
+                    </button>
+                  )}
                   <input
                     ref={videoInputRef}
                     type="file"

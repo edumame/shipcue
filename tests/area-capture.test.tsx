@@ -5,6 +5,9 @@ import userEvent from '@testing-library/user-event';
 import { ReportButton, Lightbox, selectArea } from '../src/react';
 import { captureArea } from '../src/react/capture';
 
+const gifOf = vi.hoisted(() => vi.fn<(clip: Blob, opts: { maxBytes: number }) => Promise<Blob>>());
+vi.mock('../src/react/gif', () => ({ videoToGif: gifOf }));
+
 // Select an area, capture it, mark it up, attach it with alt text (shipcue report 58b727d9).
 // jsdom has no canvas, video or screen capture: light stubs stand in for them.
 
@@ -812,6 +815,31 @@ describe('record an area (Habitect report 95eb37f6)', () => {
     await userEvent.click(screen.getByRole('button', { name: 'Select area' }));
     drag([10, 10], [110, 60]);
     expect(within(toolbar()).queryByRole('button', { name: 'Record' })).toBeNull();
+  });
+  describe('as a GIF (Habitect report 92e96c31)', () => {
+    const recordClip = async () => {
+      await startSelecting();
+      await record();
+      await waitFor(() => expect(recorders).toHaveLength(1));
+      await userEvent.click(screen.getByRole('button', { name: 'Stop recording' }));
+    };
+
+    it('Make GIF turns the clip into a GIF among the screenshots, in place of the video', async () => {
+      gifOf.mockResolvedValue(new Blob(['GIF89a'], { type: 'image/gif' }));
+      await recordClip();
+      await userEvent.click(screen.getByRole('button', { name: 'Make GIF' }));
+      await screen.findByAltText('Screenshot 1');
+      expect(gifOf.mock.calls[0]![0].type).toBe('video/webm');
+      expect(screen.queryByRole('button', { name: 'Remove video' })).toBeNull();
+    });
+
+    it('keeps the video and says so when no GIF could be made', async () => {
+      gifOf.mockRejectedValue(new Error('GIF too large'));
+      await recordClip();
+      await userEvent.click(screen.getByRole('button', { name: 'Make GIF' }));
+      await screen.findByText(/Could not make a GIF/);
+      expect(screen.getByRole('button', { name: 'Remove video' })).toBeInTheDocument();
+    });
   });
 });
 

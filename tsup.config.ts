@@ -20,6 +20,8 @@ export default defineConfig({
   format: ['esm'],
   clean: true,
   external: ['react', 'react-dom'],
+  // In shipcue's own chunk, loaded only when a GIF is made.
+  noExternal: ['gifenc'],
   // SHIPCUE_VERSION (src/core/version.ts) is package.json's version, set at build time.
   define: { __SHIPCUE_VERSION__: JSON.stringify(VERSION) },
   // The admin page's script, inlined into its own chunk (scripts/admin-ui.mjs).
