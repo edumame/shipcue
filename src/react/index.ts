@@ -15,6 +15,7 @@ export { LocalReports, ReportDetail, type LocalReportsProps } from './MyReports'
 export { BUTTON_PX, TEXT_ZOOM, type Size as ShipcueSize } from './appearance';
 export { PinIcon } from './PinIcon';
 export { Annotator, type AnnotatorProps } from './Annotator';
+export type { Mark as AnnotationMark } from './annotate';
 export { AreaSelect, type AreaSelectProps } from './AreaSelect';
 export { RecordingFrame } from './CaptureVeil';
 export { videoToGif, type GifOptions } from './gif';
