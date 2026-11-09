@@ -10,6 +10,9 @@ import { DEFAULT_TEXT, type ShipcueText } from './text';
 // 58b727d9): draw, arrow, box, highlight, text, blur and crop, a few colours, three line
 // widths, undo/redo (⌘Z / ⇧⌘Z) and clear, plus alt text that is saved with the image.
 // "Add to report" flattens it to a PNG. Canvas 2D only; pointer events, so touch draws too.
+// `marks` reopens a picture with the marks it was saved with, and onSave hands them back, so a
+// host can keep the original and let its marks be changed later (Habitect report d2b77641).
+// One pointer draws at a time: a palm or a second finger adds nothing while a stroke is going.
 
 export interface AnnotatorProps {
   /** The image to mark up: a blob: or data: URL. */
@@ -18,8 +21,10 @@ export interface AnnotatorProps {
   alt?: string;
   /** Longest alt text the handler keeps. */
   maxAlt: number;
-  /** The flattened PNG and its alt text. */
-  onSave: (image: Blob, alt: string) => void;
+  /** Marks to start from, as an earlier onSave handed them back; they undo like new ones. */
+  marks?: readonly Mark[];
+  /** The flattened PNG, its alt text, and the marks drawn on the original (to reopen it with). */
+  onSave: (image: Blob, alt: string, marks: Mark[]) => void;
   onCancel: () => void;
   text?: ShipcueText;
   /** The panel's zoom (textSize), for the toolbar and the alt text field. */
@@ -30,13 +35,13 @@ type Img = CanvasImageSource & { width: number; height: number };
 const TOOL_LABEL = (t: ShipcueText): Record<Tool, string> => ({ pen: t.toolPen, arrow: t.toolArrow, rect: t.toolRect, highlight: t.toolHighlight, text: t.toolText, blur: t.toolBlur, crop: t.toolCrop });
 const isTyping = (el: EventTarget | null) => el instanceof HTMLElement && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable);
 
-export function Annotator({ src, alt: startAlt = '', maxAlt, onSave, onCancel, text: t = DEFAULT_TEXT, zoom = 1 }: AnnotatorProps) {
+export function Annotator({ src, alt: startAlt = '', maxAlt, marks, onSave, onCancel, text: t = DEFAULT_TEXT, zoom = 1 }: AnnotatorProps) {
   const [image, setImage] = useState<Img | null>(null);
   const [failed, setFailed] = useState(false);
   const [tool, setTool] = useState<Tool>('arrow');
   const [color, setColor] = useState(SWATCHES[0]!);
   const [width, setWidth] = useState<Width>('M');
-  const [history, setHistory] = useState<History>(emptyHistory);
+  const [history, setHistory] = useState<History>(() => (marks?.length ? { done: [...marks], undone: [] } : emptyHistory()));
   const [draft, setDraftState] = useState<Mark | null>(null);
   // Also in a ref: pointer events can come faster than renders, and a fast drag must not be
   // read from a stale render (it would end as a click and draw nothing).
@@ -50,6 +55,8 @@ export function Annotator({ src, alt: startAlt = '', maxAlt, onSave, onCancel, t
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const boxRef = useRef<HTMLDivElement>(null);
   const start = useRef<Point | null>(null);
+  /** The pointer drawing the stroke under way: any other is ignored until it lifts. */
+  const drawing = useRef<number | null>(null);
 
   useEffect(() => {
     let live = true;
@@ -92,7 +99,8 @@ export function Annotator({ src, alt: startAlt = '', maxAlt, onSave, onCancel, t
     if (!canvas || !image) return;
     const ctx = canvas.getContext('2d');
     if (ctx) render(ctx, image, history.done, null, () => null);
-    canvas.toBlob((blob) => blob && onSave(blob, alt.trim().slice(0, maxAlt)), 'image/png');
+    const saved = [...history.done];
+    canvas.toBlob((blob) => blob && onSave(blob, alt.trim().slice(0, maxAlt), saved), 'image/png');
   };
 
   const keys = useRef({ onCancel, save, commitText });
@@ -161,6 +169,7 @@ export function Annotator({ src, alt: startAlt = '', maxAlt, onSave, onCancel, t
   const onDown = (e: React.PointerEvent<HTMLCanvasElement>) => {
     if (!image || e.button !== 0) return;
     e.preventDefault();
+    if (drawing.current !== null) return;
     const p = at(e);
     if (tool === 'text') {
       if (typing) commitText();
@@ -170,6 +179,7 @@ export function Annotator({ src, alt: startAlt = '', maxAlt, onSave, onCancel, t
       return;
     }
     start.current = p;
+    drawing.current = e.pointerId;
     try {
       e.currentTarget.setPointerCapture?.(e.pointerId);
     } catch {
@@ -182,13 +192,15 @@ export function Annotator({ src, alt: startAlt = '', maxAlt, onSave, onCancel, t
   const onMove = (e: React.PointerEvent<HTMLCanvasElement>) => {
     const s0 = start.current;
     const draft = draftRef.current;
-    if (!s0 || !draft) return;
+    if (!s0 || !draft || e.pointerId !== drawing.current) return;
     const p = at(e);
     if (draft.kind === 'pen' || draft.kind === 'highlight') setDraft({ ...draft, points: [...draft.points, p] });
     else if (draft.kind === 'arrow') setDraft({ ...draft, to: p });
     else if (draft.kind === 'rect' || draft.kind === 'blur' || draft.kind === 'crop') setDraft({ ...draft, rect: between(s0, p) });
   };
-  const onUp = () => {
+  const onUp = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e.pointerId !== drawing.current) return;
+    drawing.current = null;
     const d = draftRef.current;
     start.current = null;
     setDraft(null);
